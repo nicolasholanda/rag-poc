@@ -4,6 +4,8 @@ import uuid
 import sys
 from pypdf import PdfReader
 from .config import Config
+from .embeddings import Embeddings
+
 
 
 def extract_text_from_pdf(path):
@@ -36,18 +38,19 @@ def chunk_text(text, chunk_size=1000, overlap=200):
     return chunks
 
 
-def ingest(path=None, out_file=None, chunk_size=1000, overlap=200):
+def ingest(path=None, out_file=None, chunk_size=1000, overlap=200, embeddings_provider=None):
     base = path or Config.DATA_DIR
     base = os.path.abspath(base)
     if not os.path.exists(base):
         raise FileNotFoundError(base)
-    out_file = out_file or os.path.join(base, "chunks.jsonl")
+    out_file = out_file or os.path.join(base, "chunks_with_embeddings.jsonl")
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
     files = []
     for root, _, names in os.walk(base):
         for name in names:
             if name.lower().endswith((".pdf", ".md", ".txt")):
                 files.append(os.path.join(root, name))
+    emb = Embeddings(provider=embeddings_provider)
     written = 0
     with open(out_file, "w", encoding="utf-8") as out:
         for fpath in files:
@@ -59,12 +62,20 @@ def ingest(path=None, out_file=None, chunk_size=1000, overlap=200):
             except Exception:
                 continue
             chunks = chunk_text(text, chunk_size, overlap)
-            for idx, chunk in enumerate(chunks):
+            # batch embed per file
+            if not chunks:
+                continue
+            try:
+                vecs = emb.embed(chunks)
+            except Exception:
+                vecs = [None] * len(chunks)
+            for idx, (chunk, vec) in enumerate(zip(chunks, vecs)):
                 obj = {
                     "id": str(uuid.uuid4()),
                     "source": os.path.relpath(fpath, base),
                     "chunk_index": idx,
                     "text": chunk,
+                    "embedding": vec,
                 }
                 out.write(json.dumps(obj, ensure_ascii=False) + "\n")
                 written += 1
