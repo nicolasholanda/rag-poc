@@ -33,3 +33,50 @@ class MemoryVectorStore:
         for i in idx:
             results.append({"id": self.ids[i], "score": float(sims[i]), "metadata": self.metadatas[i]})
         return results
+
+    def save(self, path):
+        arr_ids = np.array(self.ids, dtype=object)
+        arr_meta = np.array(self.metadatas, dtype=object)
+        if self.embeddings is None:
+            emb = np.empty((0,))
+        else:
+            emb = self.embeddings
+        np.savez(path, embeddings=emb, ids=arr_ids, metadatas=arr_meta)
+
+    @classmethod
+    def load(cls, path):
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        data = np.load(path, allow_pickle=True)
+        inst = cls()
+        emb = data.get("embeddings")
+        if emb is not None:
+            inst.embeddings = emb
+        ids = data.get("ids")
+        metas = data.get("metadatas")
+        if ids is not None:
+            inst.ids = ids.tolist()
+        if metas is not None:
+            inst.metadatas = metas.tolist()
+        return inst
+
+    @classmethod
+    def from_jsonl(cls, jsonl_path):
+        inst = cls()
+        ids = []
+        embeds = []
+        metas = []
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                ids.append(obj.get("id"))
+                embeds.append(obj.get("embedding"))
+                metas.append({"source": obj.get("source"), "chunk_index": obj.get("chunk_index"), "text": obj.get("text")})
+        if embeds:
+            inst.embeddings = np.array(embeds)
+        inst.ids = ids
+        inst.metadatas = metas
+        return inst
